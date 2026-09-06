@@ -1,6 +1,6 @@
 # Published Scope Manifest
 
-Source application: private TRONOXA production repository at commit `93d503e3d89274946f1e1cee8bd4bdecd13271f7`.
+Source application: private TRONOXA production repository at commit `d6378a3e36156af5d7d64f6e5475d6b545b2bf9c`.
 
 | Public path | Review purpose | Fidelity |
 | --- | --- | --- |

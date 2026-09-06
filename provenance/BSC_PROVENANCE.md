@@ -1,6 +1,6 @@
 # BSC/BEP-20 Provenance
 
-This snapshot records the BSC code used by TRONOXA at application commit `93d503e3d89274946f1e1cee8bd4bdecd13271f7`.
+This snapshot records the BSC code used by TRONOXA at application commit `d6378a3e36156af5d7d64f6e5475d6b545b2bf9c`.
 
 ## Vendored core
 
@@ -39,3 +39,7 @@ npm run verify:provenance
 ```
 
 The hash list detects local drift in the public snapshot. A future application update must publish a new provenance record rather than silently replacing this evidence.
+
+## BEP-20 balance preflight update
+
+The integration checks USDT and zero BNB balances before estimating fees, rechecks them at confirmation, and distinguishes balance lookup and fee estimation failures. Signing and broadcast verification remain unchanged. This source update corresponds to application PR #202; it is not a store binary release.
