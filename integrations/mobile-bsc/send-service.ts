@@ -93,10 +93,13 @@ export function createBscSendService(config: BscSendServiceConfig) {
     const amountBaseUnits = asset.kind === 'BNB'
       ? config.core.parseBnb(request.amount)
       : config.core.parseBscUsdt(request.amount);
+    const tokenBalances = asset.kind === 'USDT_BEP20'
+      ? await checkTokenBalancesBeforeEstimation(asset, from, amountBaseUnits)
+      : undefined;
     const [nonce, fee, balances] = await Promise.all([
       config.client.getPendingNonce(from),
       estimateFee(asset, from, recipient, amountBaseUnits),
-      readBalances(asset, from),
+      tokenBalances ?? readBalances(asset, from),
     ]);
     const prepared = prepareTransaction(asset, from, recipient, amountBaseUnits, nonce, fee);
     assertCurrentBalances(asset, prepared, balances, amountBaseUnits);
@@ -137,10 +140,13 @@ export function createBscSendService(config: BscSendServiceConfig) {
 
     const operation = nonceCoordinator.runExclusive(quote.from, async () => {
       validateQuote(quote, now());
+      const tokenBalances = quote.asset.kind === 'USDT_BEP20'
+        ? await checkTokenBalancesBeforeEstimation(quote.asset, quote.from, quote.amountBaseUnits)
+        : undefined;
       const [pendingNonce, currentFee, balances] = await Promise.all([
         config.client.getPendingNonce(quote.from),
         estimateFee(quote.asset, quote.from, quote.recipient, quote.amountBaseUnits),
-        readBalances(quote.asset, quote.from),
+        tokenBalances ?? readBalances(quote.asset, quote.from),
       ]);
       if (pendingNonce !== quote.nonce) throw new Error('bsc_nonce_changed_requote_required');
       if (currentFee.maximumFee > quote.fee.maximumFee) throw new Error('bsc_fee_changed_requote_required');
@@ -346,26 +352,49 @@ export function createBscSendService(config: BscSendServiceConfig) {
     recipient: string,
     amount: bigint,
   ): Promise<FeeEstimate> {
-    return asset.kind === 'BNB'
-      ? config.core.estimateBnbTransfer(config.client, { from, to: recipient, value: amount }, feeGuard)
-      : config.core.estimateTokenTransfer(config.client, {
-          from,
-          recipient,
-          token: asset.token,
-          amount,
-        }, feeGuard);
+    try {
+      return await (asset.kind === 'BNB'
+        ? config.core.estimateBnbTransfer(config.client, { from, to: recipient, value: amount }, feeGuard)
+        : config.core.estimateTokenTransfer(config.client, {
+            from,
+            recipient,
+            token: asset.token,
+            amount,
+          }, feeGuard));
+    } catch (error) {
+      if (error instanceof config.core.BscError) throw error;
+      throw new Error('bsc_fee_estimation_failed');
+    }
   }
 
   async function readBalances(asset: BscSendAsset, from: string): Promise<Readonly<{
     bnb: bigint;
     token?: bigint;
   }>> {
-    if (asset.kind === 'BNB') return { bnb: await config.client.getBnbBalance(from) };
-    const [bnb, token] = await Promise.all([
-      config.client.getBnbBalance(from),
-      config.client.getTokenBalance(from, asset.token),
-    ]);
-    return { bnb, token };
+    try {
+      if (asset.kind === 'BNB') return { bnb: await config.client.getBnbBalance(from) };
+      const [bnb, token] = await Promise.all([
+        config.client.getBnbBalance(from),
+        config.client.getTokenBalance(from, asset.token),
+      ]);
+      return { bnb, token };
+    } catch {
+      throw new Error('bsc_balance_unavailable');
+    }
+  }
+
+  async function checkTokenBalancesBeforeEstimation(asset: BscSendAsset, from: string, amount: bigint) {
+    if (amount <= 0n) throw new config.core.BscError('INVALID_AMOUNT', 'Token amount must be greater than zero');
+    const balances = await readBalances(asset, from);
+    // A node can reject simulation/estimation before assertBalances is reached.
+    // Report known balance failures first instead of disguising them as RPC errors.
+    if (balances.token === undefined || balances.token < amount) {
+      throw new config.core.BscError('INSUFFICIENT_TOKEN', 'Token balance is insufficient');
+    }
+    if (balances.bnb === 0n) {
+      throw new config.core.BscError('INSUFFICIENT_BNB', 'BNB balance cannot cover the network fee');
+    }
+    return balances;
   }
 
   function prepareTransaction(
