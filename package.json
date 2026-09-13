@@ -1,6 +1,6 @@
 {
   "name": "@tronoxa/security-core",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Open-source TRONOXA wallet key, vault, transaction validation and signing security core",
   "license": "MPL-2.0",
   "main": "dist/index.js",

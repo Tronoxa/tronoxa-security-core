@@ -9,10 +9,16 @@ import type { TronoxaBscCore } from './adapter';
 import { BSC_FEATURE_FLAGS, type BscFeatureFlags } from './feature-flags';
 import {
   listStoredBscTransactions,
+  markStoredBscTransactionNetworkSeen,
   storePendingBscTransaction,
   updateStoredBscTransaction,
   type StoredBscTransaction,
 } from './pending-transactions';
+import {
+  deleteSignedBscTransaction,
+  loadSignedBscTransaction,
+  storeSignedBscTransaction,
+} from './signed-transaction-outbox';
 
 const QUOTE_LIFETIME_MS = 120_000;
 const MAX_REMEMBERED_QUOTES = 256;
@@ -20,6 +26,10 @@ const DEFAULT_MAXIMUM_FEE_WEI = 10_000_000_000_000_000n;
 const DEFAULT_MAXIMUM_GAS_PRICE_WEI = 20_000_000_000n;
 const REPLACEMENT_GAS_BUMP_BPS = 12_000n;
 const CANCEL_GAS_LIMIT = 21_000n;
+const BROADCAST_ATTEMPTS = 3;
+const BROADCAST_RETRY_DELAY_MS = 1_500;
+const FIRST_CONFIRMATION_TIMEOUT_MS = 45_000;
+const FIRST_CONFIRMATION_POLL_MS = 2_000;
 
 export type BscSendAsset =
   | Readonly<{ kind: 'BNB' }>
@@ -43,7 +53,11 @@ export type WithAuthorizedBscSigner = <T>(
   operation: (signer: TransactionSigner) => Promise<T>,
 ) => Promise<T>;
 
-export type BscSendContext = Readonly<{ energyOrderId?: string }>;
+export type BscSendProgress = 'broadcasting' | 'confirming';
+export type BscSendContext = Readonly<{
+  energyOrderId?: string;
+  onProgress?: (progress: BscSendProgress) => void;
+}>;
 
 export type ReplacePendingBscRequest = Readonly<{
   walletId: string;
@@ -82,6 +96,7 @@ export function createBscSendService(config: BscSendServiceConfig) {
   const completed = new Map<string, StoredBscTransaction>();
   const consumed = new Set<string>();
   const replacements = new Map<string, Promise<StoredBscTransaction>>();
+  const pendingChecks = new Map<string, Promise<void>>();
 
   async function prepareQuote(request: PrepareBscSendRequest): Promise<BscSendQuote> {
     assertSendEnabled(flags, config.client.chainId);
@@ -168,32 +183,40 @@ export function createBscSendService(config: BscSendServiceConfig) {
         const decoded = config.core.decodeAndVerifySignedTransaction(rawTransaction, prepared);
         if (!decoded.hash) throw new Error('bsc_signed_transaction_hash_missing');
         rememberBounded(consumed, quote.id);
-        const stored = await storePendingBscTransaction({
-          hash: decoded.hash,
-          chainId: quote.chainId,
-          walletId: quote.walletId,
-          asset: quote.asset.kind,
-          from: quote.from,
-          to: quote.recipient,
-          amountBaseUnits: quote.amountBaseUnits.toString(),
-          maximumFeeWei: currentFee.maximumFee.toString(),
-          gasLimit: currentFee.gasLimit.toString(),
-          gasPriceWei: currentFee.gasPrice.toString(),
-          nonce: quote.nonce,
-          energyOrderId: context.energyOrderId,
-        });
+        await storeSignedBscTransaction(decoded.hash, rawTransaction);
+        let stored: StoredBscTransaction;
         try {
-          const broadcastHash = await config.client.broadcastSignedTransaction(rawTransaction);
-          if (broadcastHash.toLowerCase() !== stored.hash.toLowerCase()) {
-            throw new Error('bsc_broadcast_hash_mismatch');
-          }
-        } catch {
-          // The hash is known but the network outcome is uncertain. Keep the
-          // record pending so restart tracking can recover without rebroadcast.
-          throw new Error('bsc_broadcast_status_unknown');
+          stored = await storePendingBscTransaction({
+            hash: decoded.hash,
+            chainId: quote.chainId,
+            walletId: quote.walletId,
+            asset: quote.asset.kind,
+            from: quote.from,
+            to: quote.recipient,
+            amountBaseUnits: quote.amountBaseUnits.toString(),
+            maximumFeeWei: currentFee.maximumFee.toString(),
+            gasLimit: currentFee.gasLimit.toString(),
+            gasPriceWei: currentFee.gasPrice.toString(),
+            nonce: quote.nonce,
+            energyOrderId: context.energyOrderId,
+            submissionState: 'submitting',
+          });
+        } catch (error) {
+          await deleteSignedBscTransaction(decoded.hash).catch(() => undefined);
+          throw error;
         }
-        rememberBounded(completed, quote.id, stored);
-        return stored;
+        const networkSeen = await broadcastUntilVisible(rawTransaction, stored.hash, context.onProgress);
+        if (!networkSeen) {
+          rememberBounded(completed, quote.id, stored);
+          if (context.energyOrderId) throw new Error('bsc_broadcast_status_unknown');
+          return stored;
+        }
+        const visible = await markStoredBscTransactionNetworkSeen(stored.hash);
+        await deleteSignedBscTransaction(stored.hash).catch(() => undefined);
+        context.onProgress?.('confirming');
+        const confirmed = await waitForFirstConfirmation(visible);
+        rememberBounded(completed, quote.id, confirmed);
+        return confirmed;
       } finally {
         // JavaScript strings cannot be zeroed, but dropping the last local
         // reference promptly avoids retaining signed bytes in this service.
@@ -280,35 +303,40 @@ export function createBscSendService(config: BscSendServiceConfig) {
           ));
           const decoded = config.core.decodeAndVerifySignedTransaction(rawTransaction, prepared);
           if (!decoded.hash) throw new Error('bsc_signed_transaction_hash_missing');
-          const stored = await storePendingBscTransaction({
-            hash: decoded.hash,
-            chainId: original.chainId,
-            walletId: original.walletId,
-            asset: replacementAsset.kind,
-            from,
-            to: replacementRecipient,
-            amountBaseUnits: replacementAmount.toString(),
-            maximumFeeWei: fee.maximumFee.toString(),
-            gasLimit: fee.gasLimit.toString(),
-            gasPriceWei: fee.gasPrice.toString(),
-            nonce: original.nonce,
-            ...(request.mode === 'speed-up' && original.energyOrderId
-              ? { energyOrderId: original.energyOrderId }
-              : {}),
-          });
+          await storeSignedBscTransaction(decoded.hash, rawTransaction);
+          let stored: StoredBscTransaction;
           try {
-            const broadcastHash = await config.client.broadcastSignedTransaction(rawTransaction);
-            if (broadcastHash.toLowerCase() !== stored.hash.toLowerCase()) {
-              throw new Error('bsc_broadcast_hash_mismatch');
-            }
-          } catch {
+            stored = await storePendingBscTransaction({
+              hash: decoded.hash,
+              chainId: original.chainId,
+              walletId: original.walletId,
+              asset: replacementAsset.kind,
+              from,
+              to: replacementRecipient,
+              amountBaseUnits: replacementAmount.toString(),
+              maximumFeeWei: fee.maximumFee.toString(),
+              gasLimit: fee.gasLimit.toString(),
+              gasPriceWei: fee.gasPrice.toString(),
+              nonce: original.nonce,
+              ...(request.mode === 'speed-up' && original.energyOrderId
+                ? { energyOrderId: original.energyOrderId }
+                : {}),
+              submissionState: 'submitting',
+            });
+          } catch (error) {
+            await deleteSignedBscTransaction(decoded.hash).catch(() => undefined);
+            throw error;
+          }
+          if (!await broadcastUntilVisible(rawTransaction, stored.hash)) {
             throw new Error('bsc_broadcast_status_unknown');
           }
+          const visible = await markStoredBscTransactionNetworkSeen(stored.hash);
+          await deleteSignedBscTransaction(stored.hash).catch(() => undefined);
           await updateStoredBscTransaction(original.hash, {
             status: 'replaced',
             replacementHash: stored.hash,
           }).catch(() => undefined);
-          return stored;
+          return waitForFirstConfirmation(visible);
         } finally {
           rawTransaction = '';
         }
@@ -325,24 +353,131 @@ export function createBscSendService(config: BscSendServiceConfig) {
   async function resumePending(walletId?: string): Promise<void> {
     assertBscEnabled(flags);
     const transactions = await listStoredBscTransactions(walletId);
-    for (const transaction of transactions) {
-      if (transaction.status !== 'pending' || transaction.chainId !== config.client.chainId) continue;
+    await Promise.allSettled(transactions.map((transaction) => checkPendingOnce(transaction)));
+  }
+
+  async function checkPendingOnce(transaction: StoredBscTransaction): Promise<void> {
+    if (transaction.status !== 'pending' || transaction.chainId !== config.client.chainId) return;
+    const key = transaction.hash.toLowerCase();
+    const active = pendingChecks.get(key);
+    if (active) return active;
+    const operation = (async () => {
+      let current = transaction;
+      if (current.submissionState === 'submitting') {
+        let visible = await transactionIsVisible(current.hash);
+        if (!visible) {
+          const rawTransaction = await loadSignedBscTransaction(current.hash);
+          if (rawTransaction) {
+            try {
+              const broadcastHash = await config.client.broadcastSignedTransaction(rawTransaction);
+              if (broadcastHash.toLowerCase() !== current.hash.toLowerCase()) {
+                throw new Error('bsc_broadcast_hash_mismatch');
+              }
+            } catch (error) {
+              if (error instanceof Error && error.message === 'bsc_broadcast_hash_mismatch') throw error;
+            }
+            visible = await transactionIsVisible(current.hash);
+          }
+        }
+        if (!visible) return;
+        current = await markStoredBscTransactionNetworkSeen(current.hash);
+        await deleteSignedBscTransaction(current.hash).catch(() => undefined);
+      }
+      await updateFromFirstReceipt(current);
+    })();
+    pendingChecks.set(key, operation);
+    try {
+      await operation;
+    } finally {
+      pendingChecks.delete(key);
+    }
+  }
+
+  async function broadcastUntilVisible(
+    rawTransaction: string,
+    expectedHash: string,
+    onProgress?: (progress: BscSendProgress) => void,
+  ): Promise<boolean> {
+    onProgress?.('broadcasting');
+    for (let attempt = 0; attempt < BROADCAST_ATTEMPTS; attempt += 1) {
+      if (await transactionIsVisible(expectedHash)) return true;
       try {
-        const receipt = await config.client.waitForTransactionReceipt(transaction.hash);
+        const broadcastHash = await config.client.broadcastSignedTransaction(rawTransaction);
+        if (broadcastHash.toLowerCase() !== expectedHash.toLowerCase()) {
+          throw new Error('bsc_broadcast_hash_mismatch');
+        }
+      } catch (error) {
+        if (error instanceof Error && error.message === 'bsc_broadcast_hash_mismatch') throw error;
+      }
+      if (await transactionIsVisible(expectedHash)) return true;
+      if (attempt + 1 < BROADCAST_ATTEMPTS) await delay(BROADCAST_RETRY_DELAY_MS);
+    }
+    return false;
+  }
+
+  async function transactionIsVisible(hash: string): Promise<boolean> {
+    try {
+      const value = await config.client.request('eth_getTransactionByHash', [hash]);
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+      const returnedHash = (value as Record<string, unknown>).hash;
+      return typeof returnedHash === 'string' && returnedHash.toLowerCase() === hash.toLowerCase();
+    } catch {
+      return false;
+    }
+  }
+
+  async function waitForFirstConfirmation(transaction: StoredBscTransaction): Promise<StoredBscTransaction> {
+    try {
+      const receipt = await config.client.waitForTransactionReceipt(transaction.hash, {
+        confirmations: 1,
+        timeoutMs: FIRST_CONFIRMATION_TIMEOUT_MS,
+        pollIntervalMs: FIRST_CONFIRMATION_POLL_MS,
+      });
+      return await updateStoredBscTransaction(transaction.hash, {
+        status: 'confirmed',
+        blockNumber: receipt.blockNumber.toString(),
+      });
+    } catch (error) {
+      if (error instanceof config.core.BscError && error.code === 'TRANSACTION_REVERTED') {
+        await updateStoredBscTransaction(transaction.hash, {
+          status: 'failed',
+          failureCode: 'TRANSACTION_REVERTED',
+        });
+        throw error;
+      }
+      return transaction;
+    }
+  }
+
+  async function updateFromFirstReceipt(transaction: StoredBscTransaction): Promise<void> {
+    let value: unknown;
+    try {
+      value = await config.client.request('eth_getTransactionReceipt', [transaction.hash]);
+    } catch {
+      return;
+    }
+    if (value === null) return;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+    const receipt = value as Record<string, unknown>;
+    if (typeof receipt.transactionHash !== 'string'
+      || receipt.transactionHash.toLowerCase() !== transaction.hash.toLowerCase()) return;
+    try {
+      const status = config.core.parseRpcQuantity(receipt.status);
+      const blockNumber = config.core.parseRpcQuantity(receipt.blockNumber);
+      if (status === 1n) {
         await updateStoredBscTransaction(transaction.hash, {
           status: 'confirmed',
-          blockNumber: receipt.blockNumber.toString(),
+          blockNumber: blockNumber.toString(),
         });
-      } catch (error) {
-        if (error instanceof config.core.BscError && error.code === 'TRANSACTION_REVERTED') {
-          await updateStoredBscTransaction(transaction.hash, {
-            status: 'failed',
-            failureCode: 'TRANSACTION_REVERTED',
-          });
-        }
-        // Timeouts and temporary RPC failures remain pending for the next
-        // foreground/restart pass; they are never guessed to be dropped.
+      } else if (status === 0n) {
+        await updateStoredBscTransaction(transaction.hash, {
+          status: 'failed',
+          blockNumber: blockNumber.toString(),
+          failureCode: 'TRANSACTION_REVERTED',
+        });
       }
+    } catch {
+      // Malformed and temporary RPC results remain pending for a later pass.
     }
   }
 
@@ -519,6 +654,10 @@ function replacementFee(gasLimit: bigint, gasPrice: bigint): FeeEstimate {
 
 function ceilDivide(value: bigint, divisor: bigint): bigint {
   return (value + divisor - 1n) / divisor;
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function rememberBounded<T>(collection: Map<string, T>, key: string, value: T): void;

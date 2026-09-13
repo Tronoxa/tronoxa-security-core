@@ -1,9 +1,9 @@
 # TRONOXA Security Core
 
-[![Security](https://github.com/mharb787/tronoxa-security-core/actions/workflows/security.yml/badge.svg)](https://github.com/mharb787/tronoxa-security-core/actions/workflows/security.yml)
-[![Reproducible packages](https://github.com/mharb787/tronoxa-security-core/actions/workflows/build.yml/badge.svg)](https://github.com/mharb787/tronoxa-security-core/actions/workflows/build.yml)
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/mharb787/tronoxa-security-core/badge)](https://scorecard.dev/viewer/?uri=github.com/mharb787/tronoxa-security-core)
-[![SPDX SBOM](https://github.com/mharb787/tronoxa-security-core/actions/workflows/sbom.yml/badge.svg)](https://github.com/mharb787/tronoxa-security-core/actions/workflows/sbom.yml)
+[![Security](https://github.com/Tronoxa/tronoxa-security-core/actions/workflows/security.yml/badge.svg)](https://github.com/Tronoxa/tronoxa-security-core/actions/workflows/security.yml)
+[![Reproducible packages](https://github.com/Tronoxa/tronoxa-security-core/actions/workflows/build.yml/badge.svg)](https://github.com/Tronoxa/tronoxa-security-core/actions/workflows/build.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Tronoxa/tronoxa-security-core/badge)](https://scorecard.dev/viewer/?uri=github.com/Tronoxa/tronoxa-security-core)
+[![SPDX SBOM](https://github.com/Tronoxa/tronoxa-security-core/actions/workflows/sbom.yml/badge.svg)](https://github.com/Tronoxa/tronoxa-security-core/actions/workflows/sbom.yml)
 [![License: MPL-2.0](https://img.shields.io/badge/License-MPL--2.0-blue.svg)](LICENSE)
 
 This repository publishes the security-sensitive wallet code used by TRONOXA for independent inspection. It contains TRON key derivation, encrypted-vault handling, transaction validation and local signing, plus the **actual BEP-20/BSC core package and mobile integration code** used by the application.
@@ -16,7 +16,7 @@ It is not the complete TRONOXA product. UI, branding, pricing, order orchestrati
 - Security & Transparency: [tronoxa.com/security](https://tronoxa.com/security)
 - Verified official accounts: [tronoxa.com/official-links](https://tronoxa.com/official-links)
 - Google Play: [TRONOXA](https://play.google.com/store/apps/details?id=com.tronoxa.app)
-- Current public release: [v1.0.0](https://github.com/mharb787/tronoxa-security-core/releases/tag/v1.0.0), including `SHA256SUMS` and GitHub Build Provenance
+- Current public release: [v1.0.1](https://github.com/Tronoxa/tronoxa-security-core/releases/tag/v1.0.1), including `SHA256SUMS` and GitHub Build Provenance
 
 Only the website, store listing and accounts linked above should be treated as official TRONOXA identities.
 
@@ -87,7 +87,7 @@ Never paste a funded recovery phrase into a website, issue, test, screenshot or 
 Requirements: Node.js 20+ and npm.
 
 ```bash
-git clone https://github.com/mharb787/tronoxa-security-core.git
+git clone https://github.com/Tronoxa/tronoxa-security-core.git
 cd tronoxa-security-core
 npm ci
 npm run build
