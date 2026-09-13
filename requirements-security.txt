@@ -2,7 +2,6 @@
 # Update this file only after regenerating and verifying every artifact hash.
 mobsfscan==1.0.0 --hash=sha256:0a3fd488a275382efdbf94942208a471a039c4b2ff557f4a3577a512f7e8e4b8
 semgrep==1.172.0 --hash=sha256:d8b94af4266a575287ad2cd844573743ab4fe58f6bfb6d9229327807937eade3
-mcp==1.23.3 --hash=sha256:32768af4b46a1b4f7df34e2bfdf5c6011e7b63d7f1b0e321d0fdef4cd6082031
 ruamel.yaml.clib==0.2.15 --hash=sha256:11e5499db1ccbc7f4b41f0565e4f799d863ea720e01d3e99fa0b7b5fcd7802c9
 boltons==21.0.0 --hash=sha256:b9bb7b58b2b420bbe11a6025fdef6d3e5edc9f76a42fb467afe7ca212ef9948b
 click==8.4.2 --hash=sha256:e6f9f66136c816745b9d65817da91d61d957fb16e02e4dcd0552553c5a197b76
