@@ -57,7 +57,7 @@ jobs:
       - name: MobSF source scan
         id: mobsf
         run: |
-          python -m pip install 'mobsfscan==1.0.0'
+          python -m pip install --require-hashes -r requirements-security.txt
           set +e
           mobsfscan . --sarif --output mobsfscan.sarif
           status=$?
@@ -71,20 +71,12 @@ jobs:
           sarif_file: mobsfscan.sarif
           category: mobsf-source
 
-      - name: Detect Solidity contracts
-        id: solidity
+      - name: Enforce the published no-Solidity scope
         run: |
           if find . -type f -name '*.sol' -not -path './node_modules/*' | grep -q .; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo 'Solidity was added without a pinned contract-analysis tool.'
+            exit 1
           fi
-
-      - name: Slither analysis
-        if: steps.solidity.outputs.present == 'true'
-        run: |
-          python -m pip install slither-analyzer
-          slither . --json slither.json
 
       - name: Secret-pattern guard
         run: |
@@ -102,7 +94,6 @@ jobs:
         env:
           NPM_STATUS: ${{ steps.npm_audit.outputs.status }}
           MOBSF_STATUS: ${{ steps.mobsf.outputs.status }}
-          SOLIDITY_PRESENT: ${{ steps.solidity.outputs.present }}
         run: |
           test -s npm-audit.json || printf '%s\n' '{"metadata":{"vulnerabilities":{"critical":"unknown","high":"unknown","moderate":"unknown"}}}' > npm-audit.json
           test -s mobsfscan.sarif || printf '%s\n' '{"version":"2.1.0","runs":[]}' > mobsfscan.sarif
@@ -119,11 +110,7 @@ jobs:
             echo '- BSC provenance: verified by `npm test`'
             echo "- npm audit: critical=$critical, high=$high, moderate=$moderate (exit $NPM_STATUS)"
             echo "- MobSFscan SARIF error-level results: $mobsf_errors (exit $MOBSF_STATUS)"
-            if [ "$SOLIDITY_PRESENT" = 'true' ]; then
-              echo '- Slither: executed because Solidity files were detected'
-            else
-              echo '- Slither/Mythril: not applicable; no Solidity contracts detected'
-            fi
+            echo '- Slither/Mythril: not applicable; the published scope contains no Solidity contracts'
             echo
             echo '> Automated analysis is not proof that the software is vulnerability-free.'
           } | tee security-summary.md
@@ -138,7 +125,6 @@ jobs:
             npm-audit.json
             mobsfscan.sarif
             security-summary.md
-            slither.json
           if-no-files-found: warn
           retention-days: 90
 
