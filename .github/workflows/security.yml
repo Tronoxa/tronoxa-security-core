@@ -57,7 +57,10 @@ jobs:
       - name: MobSF source scan
         id: mobsf
         run: |
-          python -m pip install --require-hashes -r requirements-security.txt
+          # Install only the explicitly reviewed scanner runtime. Semgrep pins an
+          # unused MCP server extra with known advisories; MobSFscan does not use
+          # that integration for repository scans.
+          python -m pip install --no-deps --require-hashes -r requirements-security.txt
           set +e
           mobsfscan . --sarif --output mobsfscan.sarif
           status=$?
