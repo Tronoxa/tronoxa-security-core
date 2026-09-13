@@ -66,6 +66,7 @@ jobs:
           exit 0
 
       - name: Upload MobSF SARIF
+        continue-on-error: true
         uses: github/codeql-action/upload-sarif@24c7eb380a2dc368f2d129e4c65e51d172983a1e # v4
         with:
           sarif_file: mobsfscan.sarif
@@ -130,11 +131,14 @@ jobs:
 
       - name: Enforce high-risk dependency gate
         if: always()
+        env:
+          MOBSF_STATUS: ${{ steps.mobsf.outputs.status }}
         run: |
           critical=$(jq -r '.metadata.vulnerabilities.critical // 1' npm-audit.json)
           high=$(jq -r '.metadata.vulnerabilities.high // 1' npm-audit.json)
           test "$critical" -eq 0
           test "$high" -eq 0
+          test "$MOBSF_STATUS" -eq 0
 
   codeql:
     name: CodeQL JavaScript/TypeScript
