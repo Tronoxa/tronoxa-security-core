@@ -31,6 +31,9 @@ export type StoredBscTransaction = Readonly<{
   blockNumber?: string;
   replacementHash?: string;
   failureCode?: string;
+  /** New sends remain hidden from hash/receipt UI until an RPC node can retrieve them. */
+  submissionState?: 'submitting' | 'network_seen';
+  networkSeenAt?: string;
   /** Links an energy payment to its server order before broadcast for restart-safe recovery. */
   energyOrderId?: string;
   /** Set once the backend has finalized this payment and no further attach POST is needed. */
@@ -73,6 +76,7 @@ export async function storePendingBscTransaction(
         || existing.gasPriceWei !== pending.gasPriceWei
         || existing.nonce !== pending.nonce
         || existing.energyOrderId !== pending.energyOrderId
+        || existing.submissionState !== pending.submissionState
       ) throw new Error('bsc_transaction_hash_conflict');
       stored = existing;
       return transactions;
@@ -95,6 +99,24 @@ export async function markStoredBscEnergyPaymentAttached(hash: string): Promise<
       ...transaction,
       energyPaymentAttachedAt: transaction.energyPaymentAttachedAt ?? new Date().toISOString(),
       updatedAt: new Date().toISOString(),
+    });
+    return updated;
+  }));
+  if (!updated) throw new Error('bsc_transaction_not_found');
+  return updated;
+}
+
+export async function markStoredBscTransactionNetworkSeen(hash: string): Promise<StoredBscTransaction> {
+  let updated: StoredBscTransaction | null = null;
+  await mutate((transactions) => transactions.map((transaction) => {
+    if (transaction.hash.toLowerCase() !== hash.toLowerCase()) return transaction;
+    if (transaction.status !== 'pending') return transaction;
+    const networkSeenAt = transaction.networkSeenAt ?? new Date().toISOString();
+    updated = assertTransaction({
+      ...transaction,
+      submissionState: 'network_seen',
+      networkSeenAt,
+      updatedAt: networkSeenAt,
     });
     return updated;
   }));
@@ -193,6 +215,12 @@ function assertTransaction(value: unknown): StoredBscTransaction {
     || (transaction.blockNumber !== undefined && !isUnsignedInteger(transaction.blockNumber))
     || (transaction.replacementHash !== undefined && !HASH_PATTERN.test(transaction.replacementHash))
     || (transaction.failureCode !== undefined && !/^[A-Z0-9_]{1,64}$/.test(transaction.failureCode))
+    || (transaction.submissionState !== undefined
+      && transaction.submissionState !== 'submitting'
+      && transaction.submissionState !== 'network_seen')
+    || (transaction.networkSeenAt !== undefined && !isIsoDate(transaction.networkSeenAt))
+    || (transaction.submissionState === 'submitting' && transaction.networkSeenAt !== undefined)
+    || (transaction.submissionState === 'network_seen' && transaction.networkSeenAt === undefined)
     || (transaction.energyOrderId !== undefined && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(transaction.energyOrderId))
     || (transaction.energyPaymentAttachedAt !== undefined && (
       !isIsoDate(transaction.energyPaymentAttachedAt)

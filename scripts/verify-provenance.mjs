@@ -7,7 +7,7 @@ const manifestPath = path.join(root, 'provenance', 'bsc-files.sha256');
 const manifest = await readFile(manifestPath, 'utf8');
 const expected = new Map();
 
-for (const line of manifest.trim().split('\n')) {
+for (const line of manifest.trim().split(/\r?\n/)) {
   const match = /^([0-9a-f]{64})  (.+)$/.exec(line);
   if (!match) throw new Error(`Invalid provenance line: ${line}`);
   expected.set(match[2], match[1]);
@@ -35,8 +35,10 @@ if (JSON.stringify(actualFiles) !== JSON.stringify(expectedFiles)) {
 }
 
 for (const relative of actualFiles) {
+  const contents = await readFile(path.join(root, relative));
+  const normalizedContents = Buffer.from(contents.toString('utf8').replace(/\r\n/g, '\n'));
   const digest = createHash('sha256')
-    .update(await readFile(path.join(root, relative)))
+    .update(normalizedContents)
     .digest('hex');
   if (digest !== expected.get(relative)) {
     throw new Error(`BSC provenance mismatch: ${relative}`);

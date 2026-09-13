@@ -21,6 +21,7 @@ type AuthenticatedFetch = (url: string, init: RequestInit) => Promise<Response>;
 
 export function resolveBscRelayUrl(
   apiBaseUrl = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.tronoxa.com/api/v1',
+  route: 'read' | 'broadcast' = 'read',
 ): string {
   const parsed = new URL(apiBaseUrl);
   const local = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
@@ -28,13 +29,14 @@ export function resolveBscRelayUrl(
   if (parsed.username || parsed.password) throw new Error('bsc_relay_embedded_credentials_rejected');
   parsed.search = '';
   parsed.hash = '';
-  parsed.pathname = `${parsed.pathname.replace(/\/+$/, '')}/bsc-rpc`;
+  parsed.pathname = `${parsed.pathname.replace(/\/+$/, '')}/bsc-rpc/${route}`;
   return parsed.toString();
 }
 
 export class TronoxaBscRelayTransport implements JsonRpcTransport {
   readonly name = 'tronoxa-authenticated-mainnet-relay';
-  readonly #url: string;
+  readonly #readUrl: string;
+  readonly #broadcastUrl: string;
   readonly #fetcher: AuthenticatedFetch;
   #requestId = 0;
 
@@ -42,7 +44,8 @@ export class TronoxaBscRelayTransport implements JsonRpcTransport {
     apiBaseUrl?: string,
     fetcher: AuthenticatedFetch = fetchWithDeviceSession,
   ) {
-    this.#url = resolveBscRelayUrl(apiBaseUrl);
+    this.#readUrl = resolveBscRelayUrl(apiBaseUrl, 'read');
+    this.#broadcastUrl = resolveBscRelayUrl(apiBaseUrl, 'broadcast');
     this.#fetcher = fetcher;
   }
 
@@ -56,7 +59,8 @@ export class TronoxaBscRelayTransport implements JsonRpcTransport {
     const id = ++this.#requestId;
     let response: Response;
     try {
-      response = await this.#fetcher(this.#url, {
+      const url = method === 'eth_sendRawTransaction' ? this.#broadcastUrl : this.#readUrl;
+      response = await this.#fetcher(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ jsonrpc: '2.0', id, method, params }),
