@@ -1,0 +1,68 @@
+name: Sign Release Assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to sign
+        required: true
+        type: string
+
+permissions: read-all
+
+jobs:
+  sign:
+    name: Sign release assets with Sigstore
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - name: Check out the protected workflow definition
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@ba7bc0a3fef59531c69a25acd34668d6d3fe6f22 # v4.1.0
+        with:
+          cosign-release: v3.0.6
+
+      - name: Download and verify release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          case "$RELEASE_TAG" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "Refusing unexpected release tag: $RELEASE_TAG"; exit 1 ;;
+          esac
+          install -d release-assets
+          gh release download "$RELEASE_TAG" \
+            --dir release-assets \
+            --pattern 'SHA256SUMS' \
+            --pattern '*.tgz' \
+            --pattern '*.tar.gz'
+          test -s release-assets/SHA256SUMS
+          (cd release-assets && sha256sum --check SHA256SUMS)
+
+      - name: Sign every release asset using GitHub OIDC
+        env:
+          COSIGN_YES: "true"
+        run: |
+          find release-assets -maxdepth 1 -type f \
+            ! -name '*.sigstore.json' -print0 \
+            | while IFS= read -r -d '' asset; do
+                cosign sign-blob \
+                  --yes \
+                  --bundle "${asset}.sigstore.json" \
+                  "$asset"
+              done
+          test "$(find release-assets -maxdepth 1 -name '*.sigstore.json' | wc -l)" -ge 1
+
+      - name: Attach signatures to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: gh release upload "$RELEASE_TAG" release-assets/*.sigstore.json --clobber
