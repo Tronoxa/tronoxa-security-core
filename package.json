@@ -38,8 +38,8 @@
     "tronweb": "6.4.0"
   },
   "devDependencies": {
-    "@types/node": "20.19.30",
-    "typescript": "5.9.2"
+    "@types/node": "26.5.1",
+    "typescript": "7.0.2"
   },
   "overrides": {
     "ws": "^8.21.0"
