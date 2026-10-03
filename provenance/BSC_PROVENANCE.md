@@ -47,3 +47,7 @@ The hash list detects local drift in the public snapshot. A future application u
 ## BEP-20 broadcast and confirmation update
 
 The integration keeps the balance and fee preflight controls from application PR #202 and adds isolated broadcast routing, bounded retries, a durable signed-transaction outbox, network-visibility gating, and first-confirmation tracking. A locally derived hash remains internal until an RPC node can retrieve the transaction. This source snapshot corresponds to application commit `d473f3c1bf41394648e6aa5fb7b0a877fe61f8ed`; it is not a store binary or binary-equivalence claim.
+
+## Integration update — 2026-10-03
+
+The history and relay integrations match application commit `c5ca13b` in `Tronoxa/tron-wallet-mvp` (PR #233). Only these two integration hashes were updated; the BSC core package and vendor artifact remain unchanged. Recursive directory comparison and the complete SHA-256 provenance check passed on the server.
