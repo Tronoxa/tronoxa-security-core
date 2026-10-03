@@ -6,7 +6,7 @@ const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const HASH = /^0x[0-9a-fA-F]{64}$/;
 const QUANTITY = /^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/;
 const CACHE_PREFIX = 'bsc.history.v1';
-export const BSC_HISTORY_ACTIVE_REFRESH_INTERVAL_MS = 60_000;
+export const BSC_HISTORY_ACTIVE_REFRESH_INTERVAL_MS = 15_000;
 
 export type BscHistoryItem = Readonly<{
   key: string;
@@ -24,6 +24,8 @@ export type BscHistoryItem = Readonly<{
 export type BscHistoryPage = Readonly<{
   items: readonly BscHistoryItem[];
   pageKey: string | null;
+  partial?: boolean;
+  stale?: boolean;
 }>;
 
 export type BscHistoryRefreshHealth = Readonly<{
@@ -64,7 +66,11 @@ export async function fetchBscHistoryPage(
   base.pathname = `${base.pathname.replace(/\/+$/, '')}/bsc-history/${encodeURIComponent(checksum)}`;
   base.search = pageKey ? new URLSearchParams({ cursor: pageKey }).toString() : '';
   base.hash = '';
-  const response = await fetchWithDeviceSession(base.toString(), { method: 'GET' });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10_000);
+  let response: Response;
+  try { response = await fetchWithDeviceSession(base.toString(), { method: 'GET', signal: controller.signal }); }
+  finally { clearTimeout(timer); }
   if (!response.ok) throw new Error('bsc_history_unavailable');
   const result = await response.json();
   return parseHistoryPage(
@@ -134,7 +140,7 @@ export function parseHistoryPage(
   if (next !== undefined && next !== null && (typeof next !== 'string' || (next !== '' && !/^[A-Za-z0-9_:=,\/+\-]{1,512}$/.test(next)))) {
     throw new Error('bsc_history_response_invalid');
   }
-  return Object.freeze({ items: Object.freeze(items), pageKey: typeof next === 'string' && next.length > 0 ? next : null });
+  return Object.freeze({ items: Object.freeze(items), pageKey: typeof next === 'string' && next.length > 0 ? next : null, ...(root.partial === true ? { partial: true } : {}), ...(root.stale === true ? { stale: true } : {}) });
 }
 
 export async function loadCachedBscHistory(chainId: 56 | 97, walletId: string): Promise<BscHistoryItem[]> {

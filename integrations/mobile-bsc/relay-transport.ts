@@ -39,6 +39,9 @@ export class TronoxaBscRelayTransport implements JsonRpcTransport {
   readonly #broadcastUrl: string;
   readonly #fetcher: AuthenticatedFetch;
   #requestId = 0;
+  #nextReadAt = 0;
+  readonly #cache = new Map<string, { expires: number; value: unknown }>();
+  readonly #inflight = new Map<string, Promise<unknown>>();
 
   constructor(
     apiBaseUrl?: string,
@@ -56,6 +59,40 @@ export class TronoxaBscRelayTransport implements JsonRpcTransport {
   ): Promise<unknown> {
     if (!ALLOWED_METHODS.has(method)) throw new Error('bsc_relay_method_not_allowed');
     validateSensitiveRequest(method, params);
+    const read = method !== 'eth_sendRawTransaction';
+    const key = JSON.stringify([method, params]);
+    const ttl = method === 'eth_chainId' ? 30_000 : 0;
+    const cached = this.#cache.get(key);
+    if (read && cached && cached.expires > Date.now()) return cached.value;
+    const active = this.#inflight.get(key);
+    if (read && active) return active;
+    const operation = (async () => {
+      if (read) {
+        const now = Date.now();
+        const startAt = Math.max(now, this.#nextReadAt);
+        if (startAt - now > 5_000) throw new Error('bsc_relay_rate_limited');
+        this.#nextReadAt = startAt + 1_200;
+        if (startAt > now) await new Promise<void>((resolve, reject) => {
+          const abort = () => { clearTimeout(timer); reject(new Error('bsc_relay_unavailable')); };
+          const timer = setTimeout(() => { signal?.removeEventListener('abort', abort); resolve(); }, startAt - now);
+          signal?.addEventListener('abort', abort, { once: true });
+          if (signal?.aborted) abort();
+        });
+        if (signal?.aborted) throw new Error('bsc_relay_unavailable');
+      }
+      const value = await this.sendRequest(method, params, signal);
+      if (read && ttl) {
+        if (this.#cache.size >= 256) this.#cache.delete(this.#cache.keys().next().value!);
+        this.#cache.set(key, { value, expires: Date.now() + ttl });
+      }
+      return value;
+    })();
+    if (read) this.#inflight.set(key, operation);
+    try { return await operation; }
+    finally { if (this.#inflight.get(key) === operation) this.#inflight.delete(key); }
+  }
+
+  private async sendRequest(method: string, params: readonly unknown[], signal?: AbortSignal): Promise<unknown> {
     const id = ++this.#requestId;
     let response: Response;
     try {
@@ -68,6 +105,10 @@ export class TronoxaBscRelayTransport implements JsonRpcTransport {
       });
     } catch {
       throw new Error('bsc_relay_unavailable');
+    }
+    if (response.status === 429) {
+      this.#nextReadAt = Math.max(this.#nextReadAt, Date.now() + 60_000);
+      throw new Error('bsc_relay_rate_limited');
     }
     if (!response.ok) throw new Error('bsc_relay_unavailable');
     let payload: unknown;
