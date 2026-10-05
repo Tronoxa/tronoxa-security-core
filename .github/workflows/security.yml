@@ -37,12 +37,6 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Trial patched Axios and generate candidate lock
-        run: |
-          npm pkg set overrides.axios=1.20.0
-          npm install --package-lock-only --ignore-scripts
-          node -e 'console.log("CANDIDATE_LOCK=" + JSON.stringify(require("./package-lock.json")))'
-
       - name: Install locked JavaScript dependencies
         run: npm ci
 
