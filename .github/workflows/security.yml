@@ -96,7 +96,7 @@ jobs:
             --glob '!node_modules/**' \
             --glob '!package-lock.json' \
             --glob '!*.map' \
-            '(-----BEGIN (RSA|EC|OPENSSH|PRIVATE) KEY-----|(?!SIGNING_SECRET_PREFIX[[:space:]]*=)[A-Za-z0-9_]*(SECRET|PRIVATE_KEY|MNEMONIC)[A-Za-z0-9_]*[[:space:]]*=[[:space:]]*["'\''][^"'\'']+)' . || scan_status=$?
+            '(-----BEGIN (RSA|EC|OPENSSH|PRIVATE) KEY-----|\b(?!SIGNING_SECRET_PREFIX[[:space:]]*=)[A-Za-z0-9_]*(SECRET|PRIVATE_KEY|MNEMONIC)[A-Za-z0-9_]*[[:space:]]*=[[:space:]]*["'\''][^"'\'']+)' . || scan_status=$?
           case "$scan_status" in
             0) echo 'Potential committed secret pattern detected.'; exit 1 ;;
             1) echo 'Secret-pattern scan completed without matches.' ;;
