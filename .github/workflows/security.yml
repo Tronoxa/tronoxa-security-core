@@ -82,16 +82,26 @@ jobs:
             exit 1
           fi
 
+      - name: Install secret scanner
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ripgrep
+          command -v rg
+
       - name: Secret-pattern guard
         run: |
-          if rg -n --hidden \
+          command -v rg >/dev/null || { echo 'Secret scanner unavailable'; exit 1; }
+          scan_status=0
+          rg -n --hidden \
             --glob '!node_modules/**' \
             --glob '!package-lock.json' \
             --glob '!*.map' \
-            '(-----BEGIN (RSA|EC|OPENSSH|PRIVATE) KEY-----|[A-Za-z0-9_]*(SECRET|PRIVATE_KEY|MNEMONIC)[A-Za-z0-9_]*[[:space:]]*=[[:space:]]*["'\''][^"'\'']+)' .; then
-            echo 'Potential committed secret pattern detected.'
-            exit 1
-          fi
+            '(-----BEGIN (RSA|EC|OPENSSH|PRIVATE) KEY-----|[A-Za-z0-9_]*(SECRET|PRIVATE_KEY|MNEMONIC)[A-Za-z0-9_]*[[:space:]]*=[[:space:]]*["'\''][^"'\'']+)' . || scan_status=$?
+          case "$scan_status" in
+            0) echo 'Potential committed secret pattern detected.'; exit 1 ;;
+            1) echo 'Secret-pattern scan completed without matches.' ;;
+            *) echo "Secret scanner failed with exit $scan_status"; exit "$scan_status" ;;
+          esac
 
       - name: Write markdown security summary
         if: always()
