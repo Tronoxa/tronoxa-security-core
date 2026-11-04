@@ -1,6 +1,6 @@
 {
   "name": "@tronoxa/security-core",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Open-source TRONOXA wallet key, vault, transaction validation and signing security core",
   "license": "MPL-2.0",
   "main": "dist/index.js",
@@ -27,15 +27,15 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "test": "npm run test:signing && npm run test:vault && npm run verify:provenance",
-    "test:signing": "node scripts/security-signing-smoke.cjs",
+    "test:signing": "node scripts/security-signing-smoke.cjs && node scripts/dependency-security-regression.cjs",
     "test:vault": "node scripts/wallet-vault-smoke.cjs",
     "verify:provenance": "node scripts/verify-provenance.mjs",
     "prepack": "npm run build && npm test"
   },
   "dependencies": {
-    "bip39": "3.1.0",
+    "bip39": "3.1.2",
     "buffer": "6.0.3",
-    "tronweb": "6.4.0"
+    "tronweb": "6.5.1"
   },
   "devDependencies": {
     "@types/node": "20.19.30",

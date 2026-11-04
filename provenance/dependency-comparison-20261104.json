@@ -1,0 +1,27 @@
+{
+  "vectors": 8,
+  "derivedAccounts": 24,
+  "identicalSignedTransactions": 5,
+  "malformedEntropyRejected": true,
+  "inheritedWordlistRejected": true,
+  "results": [
+    {
+      "label": "6.4.0",
+      "substitution": "signed-substituted-transaction",
+      "inputSignatureMutated": true,
+      "plainTrxTrc20PermissionSigning": true,
+      "validMultisigRefresh": true,
+      "existingPermissionSkipsRefresh": true,
+      "dateResult": "accepted"
+    },
+    {
+      "label": "6.5.1",
+      "substitution": "Invalid transaction provided",
+      "inputSignatureMutated": false,
+      "plainTrxTrc20PermissionSigning": true,
+      "validMultisigRefresh": true,
+      "existingPermissionSkipsRefresh": true,
+      "dateResult": "Invalid transaction provided: unsupported Date at transaction.extraMetadata"
+    }
+  ]
+}
