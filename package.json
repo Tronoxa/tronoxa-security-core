@@ -35,7 +35,7 @@
   "dependencies": {
     "bip39": "3.1.2",
     "buffer": "6.0.3",
-    "tronweb": "6.5.1"
+    "tronweb": "6.5.2"
   },
   "devDependencies": {
     "@types/node": "20.19.30",
